@@ -1,0 +1,12 @@
+﻿{
+  "name": "com.zframework.tinyrpc.generated",
+  "displayName": "TinyRPC Generated",
+  "version": "1.0.0",
+  "description": "TinyRpc \u751f\u6210\u7684\u6d88\u606f\u6570\u636e\u6a21\u7ec4",
+  "keywords": [
+    "message",
+    "tiny rpc",
+    "code generation"
+  ],
+  "type": "library"
+}

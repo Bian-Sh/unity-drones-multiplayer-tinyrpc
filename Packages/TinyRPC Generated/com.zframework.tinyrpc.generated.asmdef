@@ -1,0 +1,7 @@
+﻿{
+    "name": "com.zframework.tinyrpc.generated",
+    "references": [
+        "GUID:c5a44f231aee9ef4895a10427e883834"
+    ],
+    "autoReferenced": true
+}
