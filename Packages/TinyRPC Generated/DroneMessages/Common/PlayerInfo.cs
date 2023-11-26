@@ -5,8 +5,7 @@
 using System;
 namespace zFramework.TinyRPC.Generated
 {
-    [Serializable]
-    public partial class PlayerInfo
+    public struct PlayerInfo
     {
         public string name;
         public int playerid;

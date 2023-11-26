@@ -7,17 +7,15 @@ using zFramework.TinyRPC.Messages;
 namespace zFramework.TinyRPC.Generated
 {
     /// <summary>
-    ///  S2C = Server to Client
+    ///  服务器广播玩家下线事件
     /// </summary>
     [Serializable]
-    public partial class S2C_Login : Response
+    public partial class S2C_PlayerOffline : Message
     {
-        public bool success;
         public int playerid;
         public override void OnRecycle()
         {
             base.OnRecycle();
-            success = false;
             playerid = 0;
         }
     }

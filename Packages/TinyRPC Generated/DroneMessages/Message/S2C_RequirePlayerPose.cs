@@ -7,18 +7,19 @@ using zFramework.TinyRPC.Messages;
 namespace zFramework.TinyRPC.Generated
 {
     /// <summary>
-    ///  S2C = Server to Client
+    ///  服务器定期请求玩家上报姿态信息
     /// </summary>
     [Serializable]
-    public partial class S2C_Login : Response
+    public partial class S2C_RequirePlayerPose : Message
     {
-        public bool success;
-        public int playerid;
+        /// <summary>
+        ///  请求发生在哪一帧
+        /// </summary>
+        public int frame;
         public override void OnRecycle()
         {
             base.OnRecycle();
-            success = false;
-            playerid = 0;
+            frame = 0;
         }
     }
 }
