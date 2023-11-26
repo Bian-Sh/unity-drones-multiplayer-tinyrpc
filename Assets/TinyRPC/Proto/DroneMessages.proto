@@ -10,7 +10,7 @@ message C2S_Login // Request
 message S2C_Login // Response
 {
     bool success;
-    string playerid;
+    int32 playerid;
 }
 
 // 用户请求房间信息，服务器返回房间内所有玩家信息
@@ -26,6 +26,34 @@ message S2C_RoomInfo // Response
 	repeated PlayerInfo playerinfo ;
 }
 
+// 服务器定期请求玩家上报姿态信息
+message S2C_RequirePlayerPose // Message 
+{
+	// 请求发生在哪一帧
+	 int32 frame;
+}
+
+// 玩家上报姿态信息, 简易示例
+// 使用客户端姿态上报而不是服务器模拟后的姿态下发
+message C2S_ReportPlayerPose // Message
+{
+	// 请求发生在哪一帧
+	 int32 frame;
+	 
+	// 玩家的(移动)信息
+	PlayerInfo info ;
+}
+
+// 广播玩家姿态信息
+message S2C_BroadcastPlayerPose // Message
+{
+	// 请求发生在哪一帧
+	 int32 frame;
+	 
+	// 玩家的(移动)信息
+	repeated PlayerInfo infos ;
+}
+
 message PlayerInfo
 {
 	string name ;
@@ -35,18 +63,16 @@ message PlayerInfo
 }
 
 // 移动信息
-message MoveInfo //  Message
+message MoveInfo 
 {
-	// 初始化坐标 x 轴向
-	float X ;
-	// 初始化坐标 y 轴向
-	float Y ;
-	// 初始化坐标 z 轴向
-	float Z ;
+	Vector3 position;
+	Quaternion rotation;
+	
+	Vector3 velocity ;
+}
 
-	float A ;
-	float B ;
-	float C ;
-	float W ;
-	int32 speed ;
+// 服务器广播玩家下线事件
+message S2C_PlayerOffline // Message
+{
+	int32 playerid ;
 }
