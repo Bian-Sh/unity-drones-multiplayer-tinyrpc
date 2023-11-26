@@ -165,6 +165,12 @@
       },
       "url": "https://packages.unity.cn"
     },
+    "com.veriorpies.parrelsync": {
+      "version": "file:ParrelSync",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {}
+    },
     "com.zframework.tinyrpc": {
       "version": "file:TinyRPC",
       "depth": 0,
