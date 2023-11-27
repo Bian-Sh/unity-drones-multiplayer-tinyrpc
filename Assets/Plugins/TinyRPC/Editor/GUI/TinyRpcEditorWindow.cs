@@ -1,4 +1,7 @@
-﻿using UnityEditor;
+﻿using System;
+using System.Diagnostics;
+using System.IO;
+using UnityEditor;
 using UnityEngine;
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
@@ -25,7 +28,22 @@ namespace zFramework.TinyRPC.Editor
         {
             // title with version
             var package = PackageInfo.FindForAssembly(typeof(TinyRpcEditorWindow).Assembly);
-            var version = package.version;
+            string version;
+            if (null != package)
+            {
+                version = package.version;
+            }
+            else
+            {
+                //use StackTrace to get version
+                //获取插件版本
+                var stack = new System.Diagnostics.StackTrace(true);
+                var path = stack.GetFrame(0).GetFileName();
+                var root = Path.GetDirectoryName(path);
+                root = root.Substring(0, root.LastIndexOf("\\Editor", StringComparison.Ordinal));
+                var content = File.ReadAllText($"{root}/package.json");
+                version = JsonUtility.FromJson<Version>(content).version;
+            }
             titleContent = new GUIContent($"TinyRPC (v{version})");
             minSize = new Vector2(460, 420);
         }
@@ -84,6 +102,13 @@ namespace zFramework.TinyRPC.Editor
         #region GUIContents for tabs
         static GUIContent BT_LT = new GUIContent("Editor", "编辑器下使用的配置");
         static GUIContent BT_RT = new GUIContent("Runtime", "运行时使用的配置");
+        #endregion
+        #region Assistance Type
+        [Serializable]
+        public class Version
+        {
+            public string version;
+        }
         #endregion
     }
 }

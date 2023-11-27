@@ -87,11 +87,37 @@ namespace zFramework.TinyRPC
 
         public void Boardcast(Message message)
         {
-            foreach (var session in sessions)
+            var temp = new List<Session>(sessions);
+            //hack ,tell objectpool can not recycle this message automatically
+            // only after finish message boardcast . then recycle it
+            message.IsRecycled = true;
+            foreach (var session in temp)
             {
                 Send(session, message);
             }
+            message.IsRecycled = false;
+            ObjectPool.Recycle(message);
+            temp.Clear();
         }
+
+        public void BoardcastOthers(Session session, Message message)
+        {
+            var temp = new List<Session>(sessions);
+            //hack ,tell objectpool can not recycle this message automatically
+            // only after finish message boardcast . then recycle it
+            message.IsRecycled = true;
+            foreach (var item in temp)
+            {
+                if (item != session)
+                {
+                    Send(item, message);
+                }
+            }
+            message.IsRecycled = false;
+            ObjectPool.Recycle(message);
+            temp.Clear();
+        }
+
 
         public async Task<T> Call<T>(Session session, IRequest request) where T : class, IResponse, new()
         {
