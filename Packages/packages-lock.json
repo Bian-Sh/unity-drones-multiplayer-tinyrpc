@@ -177,12 +177,6 @@
       "source": "embedded",
       "dependencies": {}
     },
-    "com.zframework.tinyrpc.generated": {
-      "version": "file:TinyRPC Generated",
-      "depth": 0,
-      "source": "embedded",
-      "dependencies": {}
-    },
     "com.unity.modules.ai": {
       "version": "1.0.0",
       "depth": 0,

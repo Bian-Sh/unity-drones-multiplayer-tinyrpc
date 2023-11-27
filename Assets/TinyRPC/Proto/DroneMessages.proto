@@ -76,3 +76,9 @@ message S2C_PlayerOffline // Message
 {
 	int32 playerid ;
 }
+
+// 服务器广播玩家上线事件	
+message S2C_PlayerLogin // Message
+{
+	PlayerInfo playerinfo ;
+}
