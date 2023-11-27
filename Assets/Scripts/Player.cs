@@ -1,8 +1,10 @@
 ﻿using UnityEngine;
+using zFramework.TinyRPC;
 
 public class Player
 {
-    public int connectionId;
+    public Session session;
+    public int playerid;
     public string playerName;
     public GameObject avatar;
     public Vector3 position;

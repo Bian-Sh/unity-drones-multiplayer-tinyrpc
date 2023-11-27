@@ -9,6 +9,7 @@ namespace zFramework.TinyRPC.Generated
     /// <summary>
     ///  移动信息
     /// </summary>
+    [Serializable]
     public struct MoveInfo
     {
         public Vector3 position;

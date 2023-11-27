@@ -1,31 +1,20 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text;
 using UnityEngine;
-using UnityEngine.Networking;
 using UnityEngine.UI;
+using zFramework.TinyRPC;
+using zFramework.TinyRPC.Generated;
 
 public class Client : MonoBehaviour
 {
     #region Private Properties
-    private const int MAX_CONNECTIONS = 100;
-
     private string server_ip = "127.0.0.1";
     private int port = 5701;
-
-    private int hostId;
-
-    private int reliableChannel;
-    private int unreliableChannel;
-
-    private int selfClientId = -1;
-    private int connectionId;
-
+    private int playerId = -1;
     private bool isConnected = false;
-
     private string playerName;
-    private string status = string.Empty;
 
+    private TinyClient client;
     private Dictionary<int, Player> players = new Dictionary<int, Player>();
     #endregion
 
@@ -39,12 +28,41 @@ public class Client : MonoBehaviour
     public void Start()
     {
         Application.runInBackground = true;
-        SetStatus(string.Empty);
-
         view3D.SetActive(true);
+        // 监听玩家上线事件
+        this.AddNetworkSignal<S2C_PlayerLogin>(OnPlayerLogin);
+        // 监听玩家下线事件
+        this.AddNetworkSignal<S2C_PlayerOffline>(OnPlayerOffline);
+        // 监听服务器请求上报玩家姿态事件
+        this.AddNetworkSignal<S2C_BroadcastPlayerPose>(OnPlayerPositionRecived);
+
     }
 
-    public void Connect()
+    public void OnApplicationQuit()
+    {
+        client?.Stop();
+    }
+
+    private void OnPlayerPositionRecived(Session session, S2C_BroadcastPlayerPose pose)
+    {
+        // Update everyone else
+        for (int i = 1; i < pose.infos.Count; i++)
+        {
+            var playerinfo = pose.infos[i];
+            if (playerinfo.playerid != playerId)
+            {
+                if (players.ContainsKey(playerinfo.playerid))
+                {
+                    players[playerinfo.playerid].position = playerinfo.moveinfo.position;
+                    players[playerinfo.playerid].velocity = playerinfo.moveinfo.velocity;
+                    players[playerinfo.playerid].rotation = playerinfo.moveinfo.rotation;
+                }
+            }
+        }
+    }
+
+    // button click event，在连接按钮上通过Inspector面板绑定
+    public async void ConnectAsync()
     {
         // Does the player has a name
         string playerNameInput = GameObject.Find("NameInput").GetComponent<InputField>().text;
@@ -53,75 +71,58 @@ public class Client : MonoBehaviour
             Debug.Log("You must enter a name");
             return;
         }
-
         playerName = playerNameInput;
-
         SetStatus("Connecting...");
-        NetworkTransport.Init();
-        ConnectionConfig connectionConfig = new ConnectionConfig();
+        client ??= new TinyClient(server_ip, port);
+        client.OnClientDisconnected += OnClientDisconnected;
 
-        // Client and server need to have the same connection types
-        reliableChannel = connectionConfig.AddChannel(QosType.Reliable);
-        unreliableChannel = connectionConfig.AddChannel(QosType.Unreliable);
+        var result_connect = await client.ConnectAsync();
+        if (result_connect)
+        {
+            C2S_Login login = ObjectPool.Allocate<C2S_Login>();
+            login.name = playerName;
+            login.password = "fake psw";
+            var result_login = await client.Call<S2C_Login>(login);
 
-        HostTopology topo = new HostTopology(connectionConfig, MAX_CONNECTIONS);
-
-        hostId = NetworkTransport.AddHost(topo, 0);
-        connectionId = NetworkTransport.Connect(hostId, server_ip, port, 0, out _);
-
-        isConnected = true;
-        SetStatus("Connected");
+            if (result_login.success)
+            {
+                Debug.Log($"{nameof(Client)}: 登录成功！ ");
+                this.playerId = result_login.playerid;
+                // todo : 请求当前房间信息（所有玩家的位置信息，包括自己）
+                var result_roomInfo = await client.Call<S2C_RoomInfo>(ObjectPool.Allocate<C2S_RoomInfo>());
+                foreach (var item in result_roomInfo.playerinfo)
+                {
+                    var player = SpawnPlayer(item.playerid, item.name);
+                    // 无差别对姿态赋初始值
+                    player.position = item.moveinfo.position;
+                    player.velocity = item.moveinfo.velocity;
+                    player.rotation = item.moveinfo.rotation;
+                }
+                isConnected = true;
+                SetStatus("Connected");
+                return;
+            }
+            else
+            {
+                Debug.Log($"{nameof(Client)}: 登录失败！ ");
+            }
+        }
+        else
+        {
+            Debug.Log($"{nameof(Client)}: 连接服务器失败！ ");
+        }
+        isConnected = false;
+        SetStatus("Connected Failed !");
     }
 
     private void Update()
     {
         if (!isConnected) { return; }
 
-        int recHostId;
-        int connectionId;
-        int channelId;
-        byte[] recBuffer = new byte[1024];
-        int bufferSize = 1024;
-        int dataSize;
-        byte error;
-        NetworkEventType recData = NetworkTransport.Receive(out recHostId, out connectionId, out channelId, recBuffer, bufferSize, out dataSize, out error);
-        switch (recData)
-        {
-            case NetworkEventType.DataEvent:       //3
-                string message = Encoding.Unicode.GetString(recBuffer, 0, dataSize);
-                Debug.Log("Receiving : " + message);
-
-                var parts = message.Split('|');
-
-                switch (parts.Length > 0 ? parts[0] : "")
-                {
-                    case "ASKNAME":
-                        OnAskName(parts);
-                        break;
-
-                    case "UPD":
-                        SpawnPlayer(int.Parse(parts[1]), parts[2]);
-                        break;
-
-                    case "DC":
-                        PlayerDisconnected(int.Parse(parts[1]));
-                        break;
-
-                    case "ASKPOSITION":
-                        OnAskPosition(parts);
-                        break;
-
-                    default:
-                        Debug.Log("Invalid message : " + message);
-                        break;
-                }
-                break;
-        }
-
         // Update players positions
         foreach (var player in players.Values)
         {
-            if (player.connectionId != selfClientId)
+            if (player.playerid != playerId)
             {
                 player.avatar.transform.position = Vector3.Lerp(player.avatar.transform.position, player.position, 0.1f);
                 player.avatar.transform.rotation = Quaternion.Lerp(player.avatar.transform.rotation, player.rotation, 0.1f);
@@ -134,49 +135,25 @@ public class Client : MonoBehaviour
         }
     }
 
-    private void Send(string message, int channelId)
+    private Player SpawnPlayer(int id, string name)
     {
-        Debug.Log("Sending : " + message);
-        byte[] msg = Encoding.Unicode.GetBytes(message);
-        NetworkTransport.Send(hostId, connectionId, channelId, msg, message.Length * sizeof(char), out _);
+        //  if(players.ContainsKey(id))return players[id];
 
-    }
-
-    private void OnAskName(string[] data)
-    {
-        // Set self client's id
-        selfClientId = int.Parse(data[1]);
-
-        // Send self name to server
-        Send("NAMEIS|" + playerName, reliableChannel);
-
-        // Create all the other players
-        for (int i = 2; i < data.Length - 1; i++)
-        {
-            var otherClientId = int.Parse(data[i].Substring(0, data[i].IndexOf('%')));
-            var otherClientName = data[i].Substring(data[i].IndexOf('%') + 1);
-            SpawnPlayer(otherClientId, otherClientName);
-        }
-    }
-
-    private void SpawnPlayer(int id, string name)
-    {
-        GameObject go = Instantiate(playerPrefab) as GameObject;
+        GameObject go = Instantiate(playerPrefab);
 
         var player = new Player();
-        player.connectionId = id;
+        player.playerid = id;
         player.playerName = name;
         player.avatar = go;
         player.avatar.GetComponentInChildren<TextMesh>().text = name;
 
         // Is this ours
-        if (id == selfClientId)
+        if (id == playerId)
         {
             // Hide connection canvas
             GameObject.Find("ConnectionCanvas").SetActive(false);
 
             // Add mobility
-
             Add3DMobility(player);
 
             player.avatar.tag = "Player";
@@ -193,6 +170,7 @@ public class Client : MonoBehaviour
 
         players.Add(id, player);
         SetPlayersCount();
+        return player;
     }
 
     private void Add3DMobility(Player player)
@@ -202,47 +180,42 @@ public class Client : MonoBehaviour
         var script = camera.AddComponent<CameraFollowScript>();
         script.drone = player.avatar;
         script.angle = 18;
+
     }
 
-    private void PlayerDisconnected(int connectionId)
+    private void OnPlayerLogin(Session session, S2C_PlayerLogin login)
     {
-        if (!players.ContainsKey(connectionId)) { return; }
-
-        var playerName = players[connectionId].playerName;
-        Destroy(players[connectionId].avatar);
-        players.Remove(connectionId);
-        SetPlayersCount();
-        SetStatus("Player " + playerName + " has disconnected");
+        // 由于自己会在登录完成后请求房间信息并创建角色，所以这里无需再次创建
+        // 并且，房间请求只能执行依次，避免重复创建
+        var player = SpawnPlayer(login.playerinfo.playerid, login.playerinfo.name);
+        // 无差别对姿态赋初始值
+        var moveinfo = login.playerinfo.moveinfo;
+        player.position = moveinfo.position;
+        player.velocity = moveinfo.velocity;
+        player.rotation = moveinfo.rotation;
     }
 
-    private void OnAskPosition(string[] data)
+    private void OnPlayerOffline(Session session, S2C_PlayerOffline offline)
     {
-        // Update everyone else
-        for (int i = 1; i < data.Length; i++)
+        if (players.ContainsKey(offline.playerid))
         {
-            ServerClient state = ServerClient.LoadPosition(data[i]);
-
-            if (state.connectionId != selfClientId && players.ContainsKey(state.connectionId))
-            {
-                players[state.connectionId].position = state.position;
-                players[state.connectionId].velocity = state.velocity;
-                players[state.connectionId].rotation = state.rotation;
-            }
+            Destroy(players[offline.playerid].avatar);
+            players.Remove(offline.playerid);
+            SetPlayersCount();
+            SetStatus("Player " + offline.playerid + " has disconnected");
         }
-
-        // Send self position
-        if (players.ContainsKey(selfClientId))
+    }
+    private void OnClientDisconnected()
+    {
+        isConnected = false;
+        SetStatus("Disconnected");
+        // clear all players
+        foreach (var item in players)
         {
-            var selfState = new ServerClient
-            {
-                connectionId = selfClientId,
-                playerName = playerName,
-                position = players[selfClientId].avatar.transform.position,
-                velocity = players[selfClientId].avatar.GetComponent<Rigidbody>().velocity,
-                rotation = players[selfClientId].avatar.transform.rotation,
-            };
-            Send("UPDPOSITION|" + selfState.ToStateString(), unreliableChannel);
+            Destroy(item.Value.avatar);
         }
+        players.Clear();
+        client = null; // 方便下一个回合
     }
 
     private float statusUpdateTime = -1;

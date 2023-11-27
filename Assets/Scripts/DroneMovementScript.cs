@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
+﻿using UnityEngine;
 
 public class DroneMovementScript : MonoBehaviour {
 
@@ -127,19 +124,22 @@ public class DroneMovementScript : MonoBehaviour {
     private Vector3 velocityToSmoothDampToZero;
     void ClampingSpeedValues()
     {
-        if (Mathf.Abs(Input.GetAxis("Vertical")) > 0.2f && Mathf.Abs(Input.GetAxis("Horizontal")) > 0.2f) // 0, s = -1, w = 1
+        var vertical = Input.GetAxis("Vertical");
+        var horizontal = Input.GetAxis("Horizontal");
+
+        if (Mathf.Abs(vertical) > 0.2f && Mathf.Abs(horizontal) > 0.2f) // 0, s = -1, w = 1
         {
             drone.velocity = Vector3.ClampMagnitude(drone.velocity, Mathf.Lerp(drone.velocity.magnitude, 10.0f, Time.deltaTime * 5f));
         }
-        if (Mathf.Abs(Input.GetAxis("Vertical")) > 0.2f && Mathf.Abs(Input.GetAxis("Horizontal")) < 0.2f)
+        if (Mathf.Abs(vertical) > 0.2f && Mathf.Abs(horizontal) < 0.2f)
         {
             drone.velocity = Vector3.ClampMagnitude(drone.velocity, Mathf.Lerp(drone.velocity.magnitude, 10.0f, Time.deltaTime * 5f));
         }
-        if (Mathf.Abs(Input.GetAxis("Vertical")) < 0.2f && Mathf.Abs(Input.GetAxis("Horizontal")) > 0.2f)
+        if (Mathf.Abs(vertical) < 0.2f && Mathf.Abs(horizontal) > 0.2f)
         {
             drone.velocity = Vector3.ClampMagnitude(drone.velocity, Mathf.Lerp(drone.velocity.magnitude, 5.0f, Time.deltaTime * 5f));
         }
-        if (Mathf.Abs(Input.GetAxis("Vertical")) < 0.2f && Mathf.Abs(Input.GetAxis("Horizontal")) < 0.2f)
+        if (Mathf.Abs(vertical) < 0.2f && Mathf.Abs(horizontal) < 0.2f)
         {
             drone.velocity = Vector3.SmoothDamp(drone.velocity, Vector3.zero, ref velocityToSmoothDampToZero, 0.95f);
         }

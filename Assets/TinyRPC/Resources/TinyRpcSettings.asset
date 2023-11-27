@@ -17,6 +17,7 @@ MonoBehaviour:
   logFilters:
   - Ping
   - S2C_RequirePlayerPose
+  - S2C_BroadcastPlayerPose
   pingInterval: 1000
   pingRetry: 3
   rpcTimeout: 5000
