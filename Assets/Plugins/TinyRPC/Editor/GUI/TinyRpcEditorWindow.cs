@@ -61,10 +61,7 @@ namespace zFramework.TinyRPC.Editor
             EditorSettingWatcher.OnEditorFocused += OnEditorFocused;
         }
 
-        private void OnDisable()
-        {
-            EditorSettingWatcher.OnEditorFocused -= OnEditorFocused;
-        }
+        private void OnDisable() => EditorSettingWatcher.OnEditorFocused -= OnEditorFocused;
 
         private void OnEditorFocused()
         {
@@ -73,8 +70,6 @@ namespace zFramework.TinyRPC.Editor
             runtimeSettingsLayout.OnEnable();
             this.Repaint();
         }
-
-
 
         private void OnGUI()
         {

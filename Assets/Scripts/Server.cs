@@ -9,11 +9,13 @@ public class Server : MonoBehaviour
 {
     private int port = 5701;
     static TinyServer server;
-    private static List<Player> clients = new List<Player>();
+    private static List<Player> players = new List<Player>();
     private static int frame = 0;
     private float lastMovementUpdate;
     private float movementUpdateRate = 0.05f;
     static int id = 0;
+
+    #region Server Event
     private void Server_OnServerClosed(string obj)
     {
         Debug.Log($"{nameof(Server)}: Server is Closed！ ");
@@ -28,21 +30,23 @@ public class Server : MonoBehaviour
     {
         Debug.Log($"{nameof(Server)}: Client {session} is Disconnected！ ");
         // Remove player from player list
-        var player = clients.Find(c => c.session == session);
+        var player = players.Find(c => c.session == session);
         if (player != null)
         {
-            clients.Remove(player);
+            players.Remove(player);
 
             var report_disconnected = ObjectPool.Allocate<S2C_PlayerOffline>();
             report_disconnected.playerid = player.playerid;
-            server.Boardcast(report_disconnected);
+            server.BoardcastOthers(session, report_disconnected);
         }
         else
         {
             Debug.Log($"{nameof(Server)}: Client {session} is not found！ ");
         }
     }
+    #endregion
 
+    #region Unity Callbacks
     private void Start()
     {
         Application.runInBackground = true;
@@ -65,20 +69,24 @@ public class Server : MonoBehaviour
         {
             lastMovementUpdate = Time.time;
 
-            // Send position to players 
-            var broadcast = ObjectPool.Allocate<S2C_BroadcastPlayerPose>();
-            broadcast.frame = frame;
-            broadcast.infos = CollectPlayerInfos();
-            server.Boardcast(broadcast);
+            if (players.Count > 0)
+            {
+                // Send position to players 
+                var broadcast = ObjectPool.Allocate<S2C_BroadcastPlayerPose>();
+                broadcast.frame = frame;
+                broadcast.infos = CollectPlayerInfos();
+                server.Boardcast(broadcast);
 
-            // ask pose again
-            var askpos = ObjectPool.Allocate<S2C_RequirePlayerPose>();
-            askpos.frame = frame++;
-            server.Boardcast(askpos);
+                // ask pose again
+                var askpos = ObjectPool.Allocate<S2C_RequirePlayerPose>();
+                askpos.frame = frame++;
+                server.Boardcast(askpos);
+            }
         }
-
     }
+    #endregion
 
+    #region TinyRPC MessageHandler Task
     [MessageHandler(MessageType.RPC)]
     private static async Task OnPlayerLoginAsync(Session session, C2S_Login request, S2C_Login response)
     {
@@ -88,18 +96,15 @@ public class Server : MonoBehaviour
             session = session,
             playerid = id,
             playerName = request.name,
-            position = Vector3.zero + Vector3.right * id,
+            position = Vector3.zero + Vector3.right * id * 2,
             rotation = Quaternion.identity,
             velocity = Vector3.zero
         };
 
-        clients.Add(player);
-        Debug.Log($"{nameof(Server)}: player count = {clients.Count}");
+        players.Add(player);
         response.playerid = player.playerid;
         response.success = true;
         id++;
-        await Task.CompletedTask;
-        Debug.Log($"{nameof(Server)}: finish login ,player id= {player.playerName}");
 
         var report_login = ObjectPool.Allocate<S2C_PlayerLogin>();
         report_login.playerinfo.playerid = player.playerid;
@@ -108,6 +113,8 @@ public class Server : MonoBehaviour
         report_login.playerinfo.moveinfo.velocity = player.velocity;
         report_login.playerinfo.moveinfo.rotation = player.rotation;
         server.BoardcastOthers(session, report_login);
+
+        await Task.CompletedTask;
     }
 
     /// <summary>
@@ -132,16 +139,18 @@ public class Server : MonoBehaviour
     [MessageHandler(MessageType.Normal)]
     private static void OnPlayerReportPose(Session session, C2S_ReportPlayerPose message)
     {
-        var client = clients.Find(c => c.session == session);
+        var client = players.Find(c => c.session == session);
         client.position = message.info.moveinfo.position;
         client.velocity = message.info.moveinfo.velocity;
         client.rotation = message.info.moveinfo.rotation;
     }
+    #endregion
 
+    #region Assistant Function
     private static List<PlayerInfo> CollectPlayerInfos()
     {
         var infos = new List<PlayerInfo>();
-        foreach (var c in clients)
+        foreach (var c in players)
         {
             var playerinfo = new PlayerInfo()
             {
@@ -158,4 +167,5 @@ public class Server : MonoBehaviour
         }
         return infos;
     }
+    #endregion
 }

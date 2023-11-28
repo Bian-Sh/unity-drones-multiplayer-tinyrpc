@@ -10,4 +10,15 @@ public class Player
     public Vector3 position;
     public Vector3 velocity;
     public Quaternion rotation;
+    public Rigidbody rigidbody;
+
+    internal void CapturePlayerState()
+    {
+        if (session != null && avatar)
+        {
+            position = avatar.transform.position;
+            velocity = rigidbody.velocity;
+            rotation = avatar.transform.rotation;
+        }
+    }
 }

@@ -18,6 +18,7 @@ MonoBehaviour:
   - Ping
   - S2C_RequirePlayerPose
   - S2C_BroadcastPlayerPose
+  - C2S_ReportPlayerPose
   pingInterval: 1000
   pingRetry: 3
   rpcTimeout: 5000
