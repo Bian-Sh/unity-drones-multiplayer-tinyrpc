@@ -7,19 +7,16 @@ using zFramework.TinyRPC.Messages;
 namespace zFramework.TinyRPC.Generated
 {
     /// <summary>
-    ///  C2S = Client to Server
+    ///  服务器广播玩家上线事件
     /// </summary>
     [Serializable]
-    [ResponseType(typeof(S2C_Login))]
-    public partial class C2S_Login : Request
+    public partial class PlayerLoginReport : Message
     {
-        public string name;
-        public string password;
+        public PlayerInfo playerinfo;
         public override void OnRecycle()
         {
             base.OnRecycle();
-            name = "";
-            password = "";
+            playerinfo = default;
         }
     }
 }

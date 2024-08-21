@@ -10,7 +10,7 @@ namespace zFramework.TinyRPC.Generated
     ///  服务器广播玩家下线事件
     /// </summary>
     [Serializable]
-    public partial class S2C_PlayerOffline : Message
+    public partial class PlayerOfflineReport : Message
     {
         public int playerid;
         public override void OnRecycle()

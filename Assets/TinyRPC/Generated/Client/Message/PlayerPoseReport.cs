@@ -11,7 +11,7 @@ namespace zFramework.TinyRPC.Generated
     ///  使用客户端姿态上报而不是服务器模拟后的姿态下发
     /// </summary>
     [Serializable]
-    public partial class C2S_ReportPlayerPose : Message
+    public partial class PlayerPoseReport : Message
     {
         /// <summary>
         ///  请求发生在哪一帧

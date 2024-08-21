@@ -8,7 +8,7 @@ using zFramework.TinyRPC.Messages;
 namespace zFramework.TinyRPC.Generated
 {
     [Serializable]
-    public partial class S2C_RoomInfo : Response
+    public partial class GetRoomInfoResponse : Response
     {
         public List<PlayerInfo> playerinfo = new();
         public override void OnRecycle()

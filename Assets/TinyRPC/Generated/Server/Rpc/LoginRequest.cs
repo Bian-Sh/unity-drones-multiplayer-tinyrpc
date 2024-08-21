@@ -6,19 +6,17 @@ using System;
 using zFramework.TinyRPC.Messages;
 namespace zFramework.TinyRPC.Generated
 {
-    /// <summary>
-    ///  S2C = Server to Client
-    /// </summary>
     [Serializable]
-    public partial class S2C_Login : Response
+    [ResponseType(typeof(LoginResponse))]
+    public partial class LoginRequest : Request
     {
-        public bool success;
-        public int playerid;
+        public string name;
+        public string password;
         public override void OnRecycle()
         {
             base.OnRecycle();
-            success = false;
-            playerid = 0;
+            name = "";
+            password = "";
         }
     }
 }

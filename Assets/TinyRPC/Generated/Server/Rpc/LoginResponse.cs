@@ -6,17 +6,16 @@ using System;
 using zFramework.TinyRPC.Messages;
 namespace zFramework.TinyRPC.Generated
 {
-    /// <summary>
-    ///  服务器广播玩家上线事件
-    /// </summary>
     [Serializable]
-    public partial class S2C_PlayerLogin : Message
+    public partial class LoginResponse : Response
     {
-        public PlayerInfo playerinfo;
+        public bool success;
+        public int playerid;
         public override void OnRecycle()
         {
             base.OnRecycle();
-            playerinfo = default;
+            success = false;
+            playerid = 0;
         }
     }
 }

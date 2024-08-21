@@ -12,8 +12,8 @@ namespace zFramework.TinyRPC.Generated
     ///  暂时不需要传入什么参数
     /// </summary>
     [Serializable]
-    [ResponseType(typeof(S2C_RoomInfo))]
-    public partial class C2S_RoomInfo : Request
+    [ResponseType(typeof(GetRoomInfoResponse))]
+    public partial class GetRoomInfoRequest : Request
     {
         public override void OnRecycle()
         {
