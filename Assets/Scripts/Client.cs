@@ -9,11 +9,16 @@ public class Client : MonoBehaviour
 {
     #region Private Properties
     private string server_ip = "127.0.0.1";
-    private int port = 5701;
+    private int server_port = 8899; // fake ,will overwrite by discovery
 
     private TinyClient client;
     private Player self;
     private readonly Dictionary<int, Player> players = new();
+
+    // Discovery
+    private int port = 5701;
+    private string scope = "DRONE FOR TINYRPC";
+    private DiscoveryClient discoveryClient;
     #endregion
 
     #region Public Members
@@ -21,6 +26,7 @@ public class Client : MonoBehaviour
     public GameObject view3D;
     public Text statusText;
     public Text playersCount;
+    public Button connectBt;
     #endregion
 
 
@@ -37,6 +43,23 @@ public class Client : MonoBehaviour
         this.AddNetworkSignal<S2C_BroadcastPlayerPose>(OnPlayerPositionRecived);
         // 监听服务器请求上报玩家姿态事件
         this.AddNetworkSignal<S2C_RequirePlayerPose>(OnSvrPlayerPoseRequired);
+
+        // UI should be freezed until server is discovered
+        SetStatus("Discovering server...");
+        connectBt.interactable = false;
+
+        // Discovery
+        discoveryClient = new DiscoveryClient(port, scope);
+        discoveryClient.OnServerDiscovered += OnServerDiscovered;
+        discoveryClient.Start();
+    }
+
+    private void OnServerDiscovered(string arg1, int arg2)
+    {
+        server_ip = arg1;
+        server_port = arg2;
+        SetStatus("Server discovered, ready to connect");
+        connectBt.interactable = true;
     }
 
     public void OnApplicationQuit()
@@ -47,6 +70,7 @@ public class Client : MonoBehaviour
         this.RemoveNetworkSignal<S2C_BroadcastPlayerPose>(OnPlayerPositionRecived);
         this.RemoveNetworkSignal<S2C_RequirePlayerPose>(OnSvrPlayerPoseRequired);
         client?.Stop();
+        discoveryClient?.Stop();
     }
 
     private void Update()
@@ -83,7 +107,7 @@ public class Client : MonoBehaviour
         }
         var playerName = playerNameInput;
         SetStatus("Connecting...");
-        client ??= new TinyClient(server_ip, port);
+        client ??= new TinyClient(server_ip, server_port);
         client.OnClientDisconnected += OnClientDisconnected;
 
         var result_connect = await client.ConnectAsync();
@@ -187,14 +211,15 @@ public class Client : MonoBehaviour
         // Update everyone else
         for (int i = 0; i < pose.infos.Count; i++)
         {
-            var playerinfo = pose.infos[i];
-            if (playerinfo.playerid != this.self.playerid)
+            var info = pose.infos[i];
+            if (info.playerid != this.self.playerid)
             {
-                if (players.ContainsKey(playerinfo.playerid))
+                if (players.ContainsKey(info.playerid))
                 {
-                    players[playerinfo.playerid].position = playerinfo.moveinfo.position;
-                    players[playerinfo.playerid].velocity = playerinfo.moveinfo.velocity;
-                    players[playerinfo.playerid].rotation = playerinfo.moveinfo.rotation;
+                    var player = players[info.playerid];
+                    player.position = info.moveinfo.position;
+                    player.velocity = info.moveinfo.velocity;
+                    player.rotation = info.moveinfo.rotation;
                 }
             }
         }
@@ -229,6 +254,8 @@ public class Client : MonoBehaviour
     private Player SpawnPlayer(int id, string name, bool isLocal)
     {
         GameObject go = Instantiate(playerPrefab);
+        // log player id and name
+        Debug.Log("SpawnPlayer " + id + " : " + name);
 
         var player = new Player
         {

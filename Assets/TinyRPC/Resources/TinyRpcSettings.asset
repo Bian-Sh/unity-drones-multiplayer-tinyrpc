@@ -16,9 +16,9 @@ MonoBehaviour:
   - Assembly-CSharp
   logFilters:
   - Ping
-  - S2C_RequirePlayerPose
+  - PlayerPoseReport
   - S2C_BroadcastPlayerPose
-  - C2S_ReportPlayerPose
+  - S2C_RequirePlayerPose
   pingInterval: 1000
   pingRetry: 3
   rpcTimeout: 5000

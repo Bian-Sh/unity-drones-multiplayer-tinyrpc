@@ -1,4 +1,6 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
 using zFramework.TinyRPC;
@@ -7,13 +9,18 @@ using zFramework.TinyRPC.Generated;
 [MessageHandlerProvider]
 public class Server : MonoBehaviour
 {
-    private int port = 5701;
     static TinyServer server;
-    private static List<Player> players = new List<Player>();
+    private readonly static ConcurrentDictionary<Session, Player> players = new();
     private static int frame = 0;
     private float lastMovementUpdate;
     private float movementUpdateRate = 0.05f;
     static int id = 0;
+
+    //Discovery 
+    private int port = 5701;
+    private string scope = "DRONE FOR TINYRPC";
+    private DiscoveryServer discoveryServer;
+
 
     #region Server Event
     private void Server_OnServerClosed(string obj)
@@ -30,20 +37,20 @@ public class Server : MonoBehaviour
     {
         Debug.Log($"{nameof(Server)}: Client {session} is Disconnected！ ");
         // Remove player from player list
-        var player = players.Find(c => c.session == session);
-        if (player != null)
+        if (players.Remove(session, out var player))
         {
-            players.Remove(player);
-
-            var report = new PlayerOfflineReport
+            if (player != null)
             {
-                playerid = player.playerid
-            };
-            server.BroadcastOthers(session, report);
-        }
-        else
-        {
-            Debug.Log($"{nameof(Server)}: Client {session} is not found！ ");
+                var report = new PlayerOfflineReport
+                {
+                    playerid = player.playerid
+                };
+                server.BroadcastOthers(session, report);
+            }
+            else
+            {
+                Debug.Log($"{nameof(Server)}: Client {session} is not found！ ");
+            }
         }
     }
     #endregion
@@ -52,11 +59,25 @@ public class Server : MonoBehaviour
     private void Start()
     {
         Application.runInBackground = true;
-        server = new TinyServer(port);
+        var _port = GetValueblePort();
+        server = new TinyServer(_port);
         server.OnClientDisconnected += Server_OnClientDisconnected;
         server.OnClientEstablished += Server_OnClientEstablished;
         server.OnServerClosed += Server_OnServerClosed;
         server.Start();
+
+        // Start Discovery Server
+        discoveryServer = new DiscoveryServer(port, scope, _port);
+        discoveryServer.Start();
+    }
+
+    private int GetValueblePort()
+    {
+        var tcplistener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, 0);
+        tcplistener.Start();
+        var port = ((System.Net.IPEndPoint)tcplistener.LocalEndpoint).Port;
+        tcplistener.Stop();
+        return port;
     }
 
     private void OnApplicationQuit()
@@ -64,12 +85,12 @@ public class Server : MonoBehaviour
         server.OnClientDisconnected -= Server_OnClientDisconnected;
         server.OnClientEstablished -= Server_OnClientEstablished;
         server.OnServerClosed -= Server_OnServerClosed;
-        server.Stop();
+        server?.Stop();
+        discoveryServer?.Stop();
     }
 
     private void Update()
     {
-        // Ask player for their position
         if (Time.time - lastMovementUpdate > movementUpdateRate)
         {
             lastMovementUpdate = Time.time;
@@ -105,8 +126,15 @@ public class Server : MonoBehaviour
             rotation = Quaternion.identity,
             velocity = Vector3.zero
         };
+        if (players.TryAdd(session, player))
+        {
+            Debug.Log($"{nameof(Server)}: Player {player.playerName} is added to the server,ip = {session.IPEndPoint}");
+        }
+        else
+        {
+            Debug.Log($"{nameof(Server)}: Player {player.playerName} is not added to the server, ip = {session.IPEndPoint}");
+        }
 
-        players.Add(player);
         response.playerid = player.playerid;
         response.success = true;
 
@@ -143,10 +171,12 @@ public class Server : MonoBehaviour
     [MessageHandler(MessageType.Normal)]
     private static void OnPlayerReportPose(Session session, PlayerPoseReport message)
     {
-        var client = players.Find(c => c.session == session);
-        client.position = message.info.moveinfo.position;
-        client.velocity = message.info.moveinfo.velocity;
-        client.rotation = message.info.moveinfo.rotation;
+        if (players.TryGetValue(session, out var player))
+        {
+            player.position = message.info.moveinfo.position;
+            player.velocity = message.info.moveinfo.velocity;
+            player.rotation = message.info.moveinfo.rotation;
+        }
     }
     #endregion
 
@@ -154,6 +184,7 @@ public class Server : MonoBehaviour
     private static List<PlayerInfo> CollectPlayerInfos()
     {
         var infos = new List<PlayerInfo>();
+        var players = new List<Player>(Server.players.Values);
         foreach (var c in players)
         {
             var playerinfo = new PlayerInfo()
