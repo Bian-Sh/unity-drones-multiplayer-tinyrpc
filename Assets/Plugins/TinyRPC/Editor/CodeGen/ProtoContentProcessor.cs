@@ -2,7 +2,8 @@ using System.Collections.Generic;
 using System.Text;
 using System;
 using UnityEngine;
-namespace zFramework.TinyRPC.Editor
+using System.Linq;
+namespace zFramework.TinyRPC.Editors
 {
     /*
      该脚本实现了对传入 proto line 进行处理
@@ -28,6 +29,9 @@ namespace zFramework.TinyRPC.Editor
         bool hasBuildInTypeUsed;
         string parentClass;
         string msgName;
+        string protoName; // for debug only currently，do not reset it in "Reset" function
+        readonly TinyRpcEditorSettings settings;
+        readonly bool shouldGeneratePartialClassAll;
 
         readonly StringBuilder sb;
         readonly List<string> summarys = new();
@@ -48,7 +52,13 @@ namespace zFramework.TinyRPC.Editor
             nameof(LayerMask),
         };
 
-        public ProtoContentProcessor() => sb = new StringBuilder();
+        public ProtoContentProcessor(string protoName, TinyRpcEditorSettings settings)
+        {
+            this.settings = settings;
+            this.protoName = protoName;
+            sb = new StringBuilder();
+            shouldGeneratePartialClassAll = settings.generateAsPartialClass.Contains("*");
+        }
 
         //1. handle SerializableAttribute, call inside procerssor 
         private void AddSerializable()
@@ -65,7 +75,7 @@ namespace zFramework.TinyRPC.Editor
         {
             if (!isInsideMessage && hasResponseTypeMarked)
             {
-                throw new InvalidOperationException($"生成代码失败: 请将注释写在 ResponseType 之前！");
+                throw new InvalidOperationException($"生成代码失败: 请将注释写在 ResponseType 之前！more ↓\nproto：{protoName}\nmessage：{msgName}\nline：{line}");
             }
             summarys.Add(line.TrimStart('/'));
         }
@@ -79,7 +89,9 @@ namespace zFramework.TinyRPC.Editor
                 sb.AppendLine($"{indent}/// <summary>");
                 foreach (var item in summarys)
                 {
-                    sb.AppendLine($"{indent}/// {item}");
+                    // replace < with &lt; and > with &gt;
+                    var summary = item.Replace("<", "&lt;").Replace(">", "&gt;");
+                    sb.AppendLine($"{indent}/// {summary}");
                 }
                 sb.AppendLine($"{indent}/// </summary>");
 
@@ -106,7 +118,7 @@ namespace zFramework.TinyRPC.Editor
                 }
                 catch (Exception e) when (e is IndexOutOfRangeException)
                 {
-                    throw new NotSupportedException($"代码生成错误: ResponseType 格式错误！\n{line}");
+                    throw new NotSupportedException($"代码生成错误: ResponseType 格式错误！more ↓\nproto：{protoName}\nmessage：{msgName}\nline：{line}");
                 }
             }
         }
@@ -114,43 +126,47 @@ namespace zFramework.TinyRPC.Editor
         // 4. handle message
         public void AddMessageType(string line)
         {
-            if (line.StartsWith("message"))
+            // if has no responsetype attribute attached ,try add summary here
+            if (!hasResponseTypeMarked)
             {
-                // if has no responsetype attribute attached ,try add summary here
-                if (!hasResponseTypeMarked)
-                {
-                    InsertSummary();
-                }
-                // if is not struct and has not marked serializable , append it !
-                //Please ensure that the struct is marked with the[Serializable] attribute.
-                //I have discovered that it will not be serialized without it when used as an item in a list or as a member of another message.
-                AddSerializable();
-                msgName = line.Split(new char[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)[1];
-                string[] ss = line.Split(new[] { "//" }, StringSplitOptions.RemoveEmptyEntries);
-                parentClass = ss.Length == 2 ? ss[1].Trim() : "";
+                InsertSummary();
+            }
+            // if is not struct and has not marked serializable , append it !
+            //Please ensure that the struct is marked with the[Serializable] attribute.
+            //I have discovered that it will not be serialized without it when used as an item in a list or as a member of another message.
+            AddSerializable();
+            msgName = line.Split(new char[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)[1];
+            string[] ss = line.Split(new[] { "//" }, StringSplitOptions.RemoveEmptyEntries);
+            parentClass = ss.Length == 2 ? ss[1].Trim() : "";
 
-                if (parentClass == "Message" || parentClass == "Request" || parentClass == "Response")
+            if (parentClass == "Message" || parentClass == "Request" || parentClass == "Response")
+            {
+                sb.Append($"\tpublic partial class {msgName}");
+                sb.Append($" : {parentClass}");
+                isTinyRpcMessage = true;
+                // validate request 
+                if (parentClass == "Request" && !hasResponseTypeMarked)
+                {
+                    throw new InvalidOperationException($"生成代码失败: Request 类型的消息 {msgName} 必须 ResponseType 特性指定响应类型！more ↓\nproto：{protoName}\nmessage：{msgName}\nline：{line}");
+                }
+            }
+            else if (string.IsNullOrEmpty(parentClass))
+            {
+                if (shouldGeneratePartialClassAll || settings.generateAsPartialClass.Contains(msgName))
                 {
                     sb.Append($"\tpublic partial class {msgName}");
-                    sb.Append($" : {parentClass}");
-                    isTinyRpcMessage = true;
-                    // validate request 
-                    if (parentClass == "Request" && !hasResponseTypeMarked)
-                    {
-                        throw new InvalidOperationException($"生成代码失败: Request 类型的消息 {msgName} 必须 ResponseType 特性指定响应类型！");
-                    }
-                }
-                else if (string.IsNullOrEmpty(parentClass))
-                {
-                    sb.Append($"\tpublic struct {msgName}");
                 }
                 else
                 {
-                    Debug.LogWarning($"{nameof(TinyProtoHandler)}: 消息 {msgName} 只能 0 继承或继承自 Message、Request、Response ");
+                    sb.Append($"\tpublic struct {msgName}");
                 }
-                sb.AppendLine("\n\t{");
-                isInsideMessage = true;
             }
+            else
+            {
+                Debug.LogWarning($"{nameof(TinyProtoHandler)}: 消息 {msgName} 只能 0 继承或继承自 Message、Request、Response more ↓\nproto：{protoName}\nmessage：{msgName}\nline：{line}");
+            }
+            sb.AppendLine("\n\t{");
+            isInsideMessage = true;
         }
 
 
@@ -212,7 +228,7 @@ namespace zFramework.TinyRPC.Editor
             }
             catch (Exception e)
             {
-                Debug.LogError($"{nameof(TinyProtoHandler)}: Repeated Error {line}\n {e}");
+                Debug.LogError($"{nameof(TinyProtoHandler)}: Repeated Error，more ↓\nproto：{protoName}\nmessage：{msgName}\nline：{line}\n {e}");
             }
         }
 
@@ -273,7 +289,7 @@ namespace zFramework.TinyRPC.Editor
             }
             catch (Exception e)
             {
-                Debug.LogError($"{nameof(TinyProtoHandler)}: Create Members error, line = {line}\n {e}");
+                Debug.LogError($"{nameof(TinyProtoHandler)}: Create Members error, more ↓\nproto：{protoName}\nmessage：{msgName}\nline：{line}\n {e}");
             }
         }
 
@@ -355,10 +371,17 @@ namespace zFramework.TinyRPC.Editor
         public ScriptInfo ResolveBlockInfo(string block)
         {
             var lines = block.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            //checkout message neme first for log 
+            msgName = lines.Where(line => line.Trim().StartsWith("message")).FirstOrDefault().Split(new char[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)[1];
 
             for (int i = 0; i < lines.Length; i++)
             {
                 var line = lines[i].Trim();
+                // skip line start with "#" , it's  region comment
+                if (line.StartsWith("#"))
+                {
+                    continue;
+                }
                 //use keyword "message" instead of "{" for checking whether inside message or not
                 if (string.IsNullOrEmpty(line) || line == "{")
                 {

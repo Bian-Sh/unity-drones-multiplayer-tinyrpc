@@ -3,12 +3,12 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
-using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using zFramework.TinyRPC.Messages;
 using zFramework.TinyRPC.Settings;
 using static zFramework.TinyRPC.ObjectPool;
+using static zFramework.TinyRPC.AwaiterEx;
 
 namespace zFramework.TinyRPC
 {
@@ -24,10 +24,12 @@ namespace zFramework.TinyRPC
         internal static readonly Dictionary<Type, IRpcMessageHandler> RpcMessageHandlers = new();
         internal static readonly Dictionary<string, Type> MessageNameTypePairs = new(); // 记录了全部消息类型，key = 消息Type名，value = 消息类型
         static readonly Dictionary<Type, Type> rpcMessagePairs = new(); // RPC 消息对，key = Request , value = Response
-
+        static TinyRpcSettings settings;
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterAssembliesLoaded)]
         public static void Awake()
         {
+            // preload settings
+            settings = TinyRpcSettings.Instance;
             // regist rpc message pairs must before RegistGeneratedMessageHandlers
             RegistMessagePairs();
             RegistMessageHandlers();
@@ -38,7 +40,7 @@ namespace zFramework.TinyRPC
         public static void RegistAttributeMarkedHandlerTask()
         {
             var types = AppDomain.CurrentDomain.GetAssemblies()
-                .Where(v => TinyRpcSettings.Instance.assemblyNames.Exists(item => v.FullName.StartsWith($"{item},")))
+                .Where(v => settings.assemblyNames.Exists(item => v.FullName.StartsWith($"{item},")))
                 .SelectMany(v => v.GetTypes())
                 .Where(v => v.GetCustomAttribute<MessageHandlerProviderAttribute>() != null);
 
@@ -163,10 +165,10 @@ namespace zFramework.TinyRPC
             var requests = types.Where(type => type.IsSubclassOf(typeof(Request)));
             foreach (var type in requests)
             {
-                var handler = Activator.CreateInstance(typeof(RpcMessageHandler<,>)
-                    .MakeGenericType(type, GetResponseType(type))) as IRpcMessageHandler;
                 try
                 {
+                    var handler = Activator.CreateInstance(typeof(RpcMessageHandler<,>)
+                        .MakeGenericType(type, GetResponseType(type))) as IRpcMessageHandler;
                     RpcMessageHandlers.Add(type, handler);
                 }
                 catch (Exception e)
@@ -179,9 +181,9 @@ namespace zFramework.TinyRPC
             var messages = types.Where(type => type.IsSubclassOf(typeof(Message)));
             foreach (var type in messages)
             {
-                var handler = Activator.CreateInstance(typeof(NormalMessageHandler<>).MakeGenericType(type)) as INormalMessageHandler;
                 try
                 {
+                    var handler = Activator.CreateInstance(typeof(NormalMessageHandler<>).MakeGenericType(type)) as INormalMessageHandler;
                     NormalMessageHandlers.Add(type, handler);
                 }
                 catch (Exception e)
@@ -243,11 +245,13 @@ namespace zFramework.TinyRPC
             }
         }
 
-        internal static void HandleMessage(Session session, IMessage message)
+        internal static async void HandleMessage(Session session, IMessage message)
         {
             if (NormalMessageHandlers.TryGetValue(message.GetType(), out var handler))
             {
+                await ToMainThread;
                 handler.Dispatch(session, message);
+                Recycle(message);
             }
             else
             {
@@ -257,30 +261,33 @@ namespace zFramework.TinyRPC
 
         internal static async void HandleRequest(Session session, IRequest request)
         {
+            // 利用 IDisposable 的 using 语法糖，确保 request 在使用完毕后被回收
+            using var _ = request;
             var type = request.GetType();
             var error = string.Empty;
-            IResponse response;
+
+            // fallback , 如果 RPC 消息对没有注册，返回默认的 Response，并告知错误
+            // 但是这几乎没有可能发生，因为在注册时已经做了检查，除非消息程序集 "com.zframework.tinyrpc.generated" 被恶意修改
             if (!rpcMessagePairs.TryGetValue(type, out var responseType))
             {
-                // 几乎没有可能发生，因为在注册时已经做了检查，除非消息程序集 "com.zframework.tinyrpc.generated" 被恶意修改
+                using var fallback = Allocate<Response>();
                 error = $"RPC 请求 {request.GetType().Name} 没有找到对应的 Response 类型！";
-                response = new Response
-                {
-                    Rid = request.Rid,
-                    Error = error
-                };
+                fallback .Rid = request.Rid;
+                fallback. Error = error;
                 Debug.LogWarning($"{nameof(Manager)}: {error}");
-                session.Reply(response);
+                session.Reply(fallback);
                 return;
             }
 
-            response = Allocate(responseType) as IResponse;
+            using var response = Allocate(responseType) as IResponse;
             response.Rid = request.Rid;
 
             if (RpcMessageHandlers.TryGetValue(type, out var handler))
             {
                 try
                 {
+                    // 为避免调用 Unity 组件导致的异常，将处理器调用放到主线程
+                    await ToMainThread;
                     await handler.Dispatch(session, request, response);
                 }
                 catch (Exception e)
@@ -301,6 +308,9 @@ namespace zFramework.TinyRPC
             {
                 response.Error = error;
             }
+
+            // 为避免在主线程上等待太久，将回复操作放到其他线程
+            await ToOtherThread;
             session.Reply(response);
         }
 

@@ -65,8 +65,8 @@ namespace zFramework.TinyRPC
             }
         }
 
-        // 需要对 session ReceiveAsync 进行异常处理
-        // 故而先前的调用（_=Task.Run(session.ReceiveAsync)被修正为当前样式
+        // 需要对 self ReceiveAsync 进行异常处理
+        // 故而先前的调用（_=Task.Run(self.ReceiveAsync)被修正为当前样式
         // 同理可得，Send、Call 皆是如此
         private async void ReceiveAsync(Session session)
         {
@@ -84,40 +84,37 @@ namespace zFramework.TinyRPC
                 }
             }
         }
-
-        public void Boardcast(Message message)
+        
+        public void Broadcast(Message message,params Session[] exclude)
         {
-            var temp = new List<Session>(sessions);
-            //hack ,tell objectpool can not recycle this message automatically
-            // only after finish message boardcast . then recycle it
-            message.IsRecycled = true;
-            foreach (var session in temp)
+            // 利用 IDisposable 的 using 语法糖，确保 message 在使用完毕后被回收
+            using var _ = message;
+            // InvalidOperationException: Collection was modified; enumeration operation may not execute.
+            var cached = new List<Session>(sessions);
+            var list = new List<Session>(exclude);
+            foreach (var session in cached)
             {
+                if (list.Contains(session))
+                {
+                    continue;
+                }
                 Send(session, message);
             }
-            message.IsRecycled = false;
-            ObjectPool.Recycle(message);
-            temp.Clear();
+            cached.Clear();
         }
 
-        public void BoardcastOthers(Session session, Message message)
+        public void BroadcastOthers(Session self, Message message)
         {
-            var temp = new List<Session>(sessions);
-            //hack ,tell objectpool can not recycle this message automatically
-            // only after finish message boardcast . then recycle it
-            message.IsRecycled = true;
-            foreach (var item in temp)
+            // 利用 IDisposable 的 using 语法糖，确保 message 在使用完毕后被回收
+            using var _ = message;
+            var cached = new List<Session>(sessions);
+            cached.Remove(self);
+            foreach (var s in cached)
             {
-                if (item != session)
-                {
-                    Send(item, message);
-                }
+                Send(s, message);
             }
-            message.IsRecycled = false;
-            ObjectPool.Recycle(message);
-            temp.Clear();
+            cached.Clear();
         }
-
 
         public async Task<T> Call<T>(Session session, IRequest request) where T : class, IResponse, new()
         {
@@ -132,17 +129,17 @@ namespace zFramework.TinyRPC
             }
             catch (RpcResponseException re)
             {
-                Debug.LogError($"{nameof(TinyClient)}: RPC Response Excption {re}");
+                Debug.LogError($"{nameof(TinyServer)}: RPC Response Excption {re}");
             }
             catch (RpcTimeoutException te)
             {
-                Debug.LogError($"{nameof(TinyClient)}: RPC Timeout {te}");
+                Debug.LogError($"{nameof(TinyServer)}: RPC Timeout {te}");
             }
             //未知异常直接关断会话
             //如果还有其他已知不应该关断会话的可以在这里插入
             catch (Exception e)
             {
-                Debug.LogError($"{nameof(TinyClient)}: RPC Error {e}");
+                Debug.LogError($"{nameof(TinyServer)}: RPC Error {e}");
                 HandleDisactiveSession(session);
             }
             return response;
@@ -177,7 +174,6 @@ namespace zFramework.TinyRPC
         #region Ping Message Handler
         internal static async Task OnPingReceived(Session session, Ping request, Ping response)
         {
-            response.Rid = request.Rid;
             response.time = ServerTime;
             await Task.CompletedTask;
         }

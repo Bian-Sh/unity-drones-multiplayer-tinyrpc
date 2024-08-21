@@ -9,7 +9,7 @@ using zFramework.TinyRPC.Exceptions;
 using zFramework.TinyRPC.Settings;
 using static zFramework.TinyRPC.Manager;
 using static zFramework.TinyRPC.ObjectPool;
-using System.Collections.Generic;
+using System.Collections.Concurrent;
 
 namespace zFramework.TinyRPC
 {
@@ -18,11 +18,17 @@ namespace zFramework.TinyRPC
         public bool IsServerSide { get; }
         public bool IsAlive { get; private set; }
         public IPEndPoint IPEndPoint { get; private set; }
+        private readonly TinyRpcSettings settings;
+        private object locker = new();
 
+        //todo: TcpClient will be replaced by Transport, so that we can use other transport protocol such as kcp and websocket
+        //todo: TcpClient 将被 Transport 替换，这样我们就可以使用其他传输协议，如 kcp 和 websocket
         internal Session(TcpClient client, SynchronizationContext context, bool isServerSide)
         {
             IsServerSide = isServerSide;
             this.client = client;
+            //Settings can only be created in main thread,Preload if needed
+            settings = TinyRpcSettings.Instance;
 
             // 深度拷贝 IPEndPoint 用于在任意时候描述 Session （只要这个 Session 还能被访问）
             var iPEndPoint = (IsServerSide ? client.Client.RemoteEndPoint : client.Client.LocalEndPoint) as IPEndPoint;
@@ -37,14 +43,18 @@ namespace zFramework.TinyRPC
 
         internal void Send(IMessage message)
         {
+            //todo :need a lock ?
             var bytes = SerializeHelper.Serialize(message);
             if (IsAlive)
             {
                 var stream = client.GetStream();
                 var head = BitConverter.GetBytes(bytes.Length);
-                stream.Write(head, 0, head.Length);
-                stream.Write(bytes, 0, bytes.Length);
-                stream.Flush();
+                lock (locker)
+                {
+                    stream.Write(head, 0, head.Length);
+                    stream.Write(bytes, 0, bytes.Length);
+                    stream.Flush();
+                }
             }
             else
             {
@@ -53,7 +63,7 @@ namespace zFramework.TinyRPC
         }
         #region RPC 
         internal void Reply(IMessage message) => Send(message);
-
+        
         ///<summary>
         /// 调用RPC方法并返回响应结果。
         /// </summary>
@@ -63,6 +73,7 @@ namespace zFramework.TinyRPC
         /// <exception cref="RpcResponseException">Rpc 响应时抛出的异常</exception>
         internal async Task<T> Call<T>(IRequest request) where T : class, IResponse, new()
         {
+            using var _ = request;
             // 校验 RPC 消息匹配
             var type = GetResponseType(request);
             if (type != typeof(T))
@@ -75,7 +86,6 @@ namespace zFramework.TinyRPC
 
             Send(request);  // do not catch any exception here,just let it throw out
             var response = await RpcWaitingTask(request);
-            Recycle(request); // after waiting task, recycle request 
 
             if (!string.IsNullOrEmpty(response.Error))// 如果服务器告知了错误！
             {
@@ -83,14 +93,17 @@ namespace zFramework.TinyRPC
             }
             return response as T;
         }
-
+        
         internal void HandleResponse(IResponse response)
         {
-            if (rpcInfoPairs.TryGetValue(response.Rid, out var rpcInfo))
+            if (rpcInfoPairs.TryRemove(response.Rid, out var rpcInfo))
             {
                 rpcInfo.source.Dispose();
                 rpcInfo.task.SetResult(response);
-                rpcInfoPairs.Remove(response.Rid);
+            }
+            else if (settings.logEnabled)
+            {
+                Debug.LogWarning($"{nameof(Session)}:RpcInfoPairs TryRemove id = [{response.Rid}] Error!");
             }
         }
 
@@ -99,12 +112,15 @@ namespace zFramework.TinyRPC
             var tcs = new TaskCompletionSource<IResponse>();
             var cts = new CancellationTokenSource();
             //等待并给定特定时长的响应机会，这在发生复杂操作时很有效
-            var timeout = Mathf.Max(request.Timeout, TinyRpcSettings.Instance.rpcTimeout);
+            var timeout = Mathf.Max(request.Timeout, settings.rpcTimeout);
             cts.CancelAfter(timeout);
             var exception = new TimeoutException($"RPC Call Timeout! Request: {request}");
             cts.Token.Register(() =>
             {
-                rpcInfoPairs.Remove(request.Rid);
+                if (!rpcInfoPairs.TryRemove(request.Rid, out _))
+                {
+                    Debug.LogError($"{nameof(Session)}:RpcInfoPairs TryRemove id:[{request.Rid}] Error!");
+                }
                 tcs.TrySetException(exception);
             }, useSynchronizationContext: false);
             var rpcinfo = new RpcInfo
@@ -113,7 +129,10 @@ namespace zFramework.TinyRPC
                 task = tcs,
                 source = cts
             };
-            rpcInfoPairs.Add(request.Rid, rpcinfo);
+            if (!rpcInfoPairs.TryAdd(request.Rid, rpcinfo))
+            {
+                Debug.LogError($"{nameof(Session)}:RpcInfoPairs TryAdd [{request}] Error!");
+            }
             return tcs.Task;
         }
 
@@ -154,34 +173,33 @@ namespace zFramework.TinyRPC
                     throw new Exception("在读取网络消息时得到了不完整数据,会话断开！");
                 }
                 // 解析消息类型
-                context.Post(OnMessageReceived, body);
+                OnMessageReceived(body);
             }
         }
 
-        private void OnMessageReceived(object state)
+        private void OnMessageReceived(byte[] content)
         {
-            var content = state as byte[];
             var message = SerializeHelper.Deserialize(content);
-            if (!TinyRpcSettings.Instance.logFilters.Contains(message.GetType().Name)) //Settings can only be created in main thread
+            if (!settings.logFilters.Contains(message.GetType().Name))
             {
                 Debug.Log($"{nameof(Session)}:   {(IsServerSide ? "Server" : "Client")} 收到网络消息 = {message.GetType().Name}  {message}");
             }
-            // rpc message
+            //处理 rpc request
             if (message is Request || (message is Ping && IsServerSide))
             {
                 HandleRequest(this, message as IRequest);
             }
             else if (message is Response || (message is Ping && !IsServerSide))
             {
+                // 处理 rpc response
+                // 提示：由于时机问题，message（Response） 无法在框架内部回收，用户需要按需回收或者交给GC
                 HandleResponse(message as IResponse);
             }
             else
             {
-                //normal message
+                //处理 normal message
                 HandleMessage(this, message);
             }
-            //todo: request 可能需要延时回收
-            Recycle(message);
         }
         public override string ToString() => $"Session: {IPEndPoint}  IsServer:{IsServerSide}";
         public void Close()
@@ -202,7 +220,7 @@ namespace zFramework.TinyRPC
         private readonly TcpClient client;
         private readonly CancellationTokenSource source;
         private readonly SynchronizationContext context;
-        private readonly Dictionary<int, RpcInfo> rpcInfoPairs = new(); // RpcId + RpcInfo
+        private readonly ConcurrentDictionary<int, RpcInfo> rpcInfoPairs = new(); // RpcId + RpcInfo
 
     }
 }

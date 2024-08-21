@@ -7,7 +7,15 @@ using UnityEditorInternal;
 using UnityEngine;
 using zFramework.TinyRPC.Settings;
 
-namespace zFramework.TinyRPC.Editor
+/*
+ * todo:代码分析器
+ * 1. 实现对 IMessage 部分字段的意外使用的判断，例如不允许用户修改 Rid 、error
+ * 2. 实现对 MessageHandlerAttribute 标注的函数/类型的检测，需要使用静态类型
+ * 3. RPC 消息处理器不允许存在多个，重复则提示错误
+ * 4. 如果类型中存在 MessageHandlerAttribute,则该类型必须被冠以 MessageHandlerProviderAttribute
+ */
+
+namespace zFramework.TinyRPC.Editors
 {
     /// <summary>
     /// 消息处理器后处理器,用于自动检测程序集是否包含 MessageHandler

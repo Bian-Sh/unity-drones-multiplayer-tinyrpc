@@ -12,7 +12,7 @@ namespace zFramework.TinyRPC
 {
     public class TinyClient
     {
-        public bool IsConnected => Session != null && Session.IsAlive;
+        public bool IsConnected => Session?.IsAlive == true;
         public Session Session { get; private set; }
         /// <summary>
         /// 当客户端连接成功时触发
@@ -28,9 +28,11 @@ namespace zFramework.TinyRPC
         ///  <br>参数2：ping 值</br>
         /// </summary>
         public Action<float, int> OnPingCaculated;
+        private readonly TinyRpcSettings settings;
 
         public TinyClient(string ip, int port)
         {
+            settings = TinyRpcSettings.Instance;
             this.ip = ip;
             this.port = port;
             client = new TcpClient();
@@ -46,23 +48,23 @@ namespace zFramework.TinyRPC
         public async Task<bool> ConnectAsync()
         {
             return await Task.Run(async () =>
-             {
-                 try
-                 {
-                     await client.ConnectAsync(ip, port);
-                     if (source.IsCancellationRequested) return false;
-                     Session = new Session(client, context, false);
-                     context.Post(v => OnClientEstablished?.Invoke(), null);
-                     _ = Task.Run(ReceiveAsync);
-                     context.Post(v => _ = PingAsync(), null);
-                     return true;
-                 }
-                 catch (Exception e)
-                 {
-                     Debug.LogError($"连接服务器失败！{e}");
-                     return false;
-                 }
-             }, source.Token);
+            {
+                try
+                {
+                    await client.ConnectAsync(ip, port);
+                    if (source.IsCancellationRequested) return false;
+                    Session = new Session(client, context, false);
+                    context.Post(v => OnClientEstablished?.Invoke(), null);
+                    _ = Task.Run(ReceiveAsync);
+                    _ = Task.Run(PingAsync);
+                    return true;
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"连接服务器失败！{e}");
+                    return false;
+                }
+            }, source.Token);
         }
 
         public void Stop()
@@ -114,14 +116,14 @@ namespace zFramework.TinyRPC
                 try
                 {
                     var begin = DateTime.Now;
-                    var pooled = Allocate<Ping>();
-                    var response = await Call<Ping>(pooled);
+                    using var pooled = Allocate<Ping>();
+                    using var response = await Call<Ping>(pooled);
                     var end = DateTime.Now;
                     var ping = (end - begin).Milliseconds;
                     // 服务器与客户端的时间差，用于在客户端上换算服务器时间
                     var delta = (response.time - ClientTime) / 10000.0f + ping / 2;
-                    OnPingCaculated?.Invoke(delta, ping);
-                    await Task.Delay(TinyRpcSettings.Instance.pingInterval);//这个API 决定了必须在主线程调用
+                    context.Post(state => OnPingCaculated?.Invoke(delta, ping), null);
+                    await Task.Delay(settings.pingInterval);
                 }
                 // 只有当收到的异常是 RpcResponseException  或者 TimeoutException 时才重试
                 catch (Exception e) when (e is RpcResponseException || e is TimeoutException)
@@ -129,8 +131,8 @@ namespace zFramework.TinyRPC
                     Debug.LogError($"{nameof(TinyClient)}: Ping Error {e} ， retry count  = {count}");
                     count++;
                     //应该稍作延迟，这可能在网络状态得到缓和的情况下加大 ping 通的几率
-                    await Task.Delay(TinyRpcSettings.Instance.pingInterval);
-                    if (count > TinyRpcSettings.Instance.pingRetry)
+                    await Task.Delay(settings.pingInterval);
+                    if (count > settings.pingRetry)
                     {
                         Stop();
                         Debug.LogError($"{nameof(TinyClient)}: Ping Timeout ，Session is inactive!");
