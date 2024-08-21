@@ -59,7 +59,7 @@ public class Server : MonoBehaviour
     private void Start()
     {
         Application.runInBackground = true;
-        var _port = GetValueblePort();
+        var _port = GetAvailablePort();
         server = new TinyServer(_port);
         server.OnClientDisconnected += Server_OnClientDisconnected;
         server.OnClientEstablished += Server_OnClientEstablished;
@@ -71,7 +71,7 @@ public class Server : MonoBehaviour
         discoveryServer.Start();
     }
 
-    private int GetValueblePort()
+    private int GetAvailablePort()
     {
         var tcplistener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, 0);
         tcplistener.Start();
