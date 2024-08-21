@@ -12,7 +12,7 @@ public class Client : MonoBehaviour
     private int port = 5701;
 
     private TinyClient client;
-    private Player player;
+    private Player self;
     private readonly Dictionary<int, Player> players = new();
     #endregion
 
@@ -30,9 +30,9 @@ public class Client : MonoBehaviour
         Application.runInBackground = true;
         view3D.SetActive(true);
         // 监听玩家上线事件
-        this.AddNetworkSignal<S2C_PlayerLogin>(OnPlayerLogin);
+        this.AddNetworkSignal<PlayerLoginReport>(OnPlayerLogin);
         // 监听玩家下线事件
-        this.AddNetworkSignal<S2C_PlayerOffline>(OnPlayerOffline);
+        this.AddNetworkSignal<PlayerOfflineReport>(OnPlayerOffline);
         // 监听服务器下发的玩家姿态事件
         this.AddNetworkSignal<S2C_BroadcastPlayerPose>(OnPlayerPositionRecived);
         // 监听服务器请求上报玩家姿态事件
@@ -41,8 +41,9 @@ public class Client : MonoBehaviour
 
     public void OnApplicationQuit()
     {
-        this.RemoveNetworkSignal<S2C_PlayerLogin>(OnPlayerLogin);
-        this.RemoveNetworkSignal<S2C_PlayerOffline>(OnPlayerOffline);
+        client.OnClientDisconnected -= OnClientDisconnected;
+        this.RemoveNetworkSignal<PlayerLoginReport>(OnPlayerLogin);
+        this.RemoveNetworkSignal<PlayerOfflineReport>(OnPlayerOffline);
         this.RemoveNetworkSignal<S2C_BroadcastPlayerPose>(OnPlayerPositionRecived);
         this.RemoveNetworkSignal<S2C_RequirePlayerPose>(OnSvrPlayerPoseRequired);
         client?.Stop();
@@ -55,7 +56,7 @@ public class Client : MonoBehaviour
         // 更新其他玩家的姿态
         foreach (var player in players.Values)
         {
-            if (player != this.player)
+            if (player != this.self)
             {
                 player.avatar.transform.position = Vector3.Lerp(player.avatar.transform.position, player.position, 0.1f);
                 player.avatar.transform.rotation = Quaternion.Lerp(player.avatar.transform.rotation, player.rotation, 0.1f);
@@ -89,32 +90,33 @@ public class Client : MonoBehaviour
         if (result_connect)
         {
 
-            C2S_Login login = new()
+            LoginRequest login = new()
             {
                 name = playerName,
                 password = "fake psw"
             };
             //1. 登录
-            var result_login = await client.Call<S2C_Login>(login);
+            var result_login = await client.Call<LoginResponse>(login);
 
             if (result_login.success)
             {
                 Debug.Log($"{nameof(Client)}: 登录成功！ ");
                 var playerId = result_login.playerid;
                 // 2. 请求当前房间信息（所有玩家的位置信息，包括自己）
-                var result_roomInfo = await client.Call<S2C_RoomInfo>(ObjectPool.Allocate<C2S_RoomInfo>());
+                var roomInfoRequest = new GetRoomInfoRequest();
+                var result_roomInfo = await client.Call<GetRoomInfoResponse>(roomInfoRequest);
                 foreach (var item in result_roomInfo.playerinfo)
                 {
                     var player = SpawnPlayer(item.playerid, item.name, item.playerid == playerId);
                     //3. 找到自己并更新设置
                     if (player.playerid == playerId)
                     {
-                        this.player = player;
-                        this.player.session = client.Session;
+                        self = player;
+                        self.session = client.Session;
                         // 为自己添加3D移动能力和3D摄像机跟随
-                        player.rigidbody = player.avatar.GetComponent<Rigidbody>();
-                        player.rigidbody.MovePosition(item.moveinfo.position);
-                        player.rigidbody.MoveRotation(item.moveinfo.rotation);
+                        self.rigidbody = self.avatar.GetComponent<Rigidbody>();
+                        self.rigidbody.MovePosition(item.moveinfo.position);
+                        self.rigidbody.MoveRotation(item.moveinfo.rotation);
                     }
                     else
                     {
@@ -154,30 +156,30 @@ public class Client : MonoBehaviour
 
     #region  TinyRPC MessageHandler （观察者模式监听）
     // 其他玩家上线
-    private void OnPlayerLogin(Session session, S2C_PlayerLogin login)
+    private void OnPlayerLogin(Session session, PlayerLoginReport report)
     {
-        var player = SpawnPlayer(login.playerinfo.playerid, login.playerinfo.name, false);
-        var moveinfo = login.playerinfo.moveinfo;
+        var player = SpawnPlayer(report.playerinfo.playerid, report.playerinfo.name, false);
+        var moveinfo = report.playerinfo.moveinfo;
         player.position = moveinfo.position;
         player.velocity = moveinfo.velocity;
         player.rotation = moveinfo.rotation;
     }
     // 其他玩家下线
-    private void OnPlayerOffline(Session session, S2C_PlayerOffline offline)
+    private void OnPlayerOffline(Session session, PlayerOfflineReport report)
     {
-        if (players.ContainsKey(offline.playerid))
+        if (players.ContainsKey(report.playerid))
         {
-            Destroy(players[offline.playerid].avatar);
-            players.Remove(offline.playerid);
+            Destroy(players[report.playerid].avatar);
+            players.Remove(report.playerid);
             SetPlayersCount();
-            SetStatus("Player " + offline.playerid + " has disconnected");
+            SetStatus("Player " + report.playerid + " has disconnected");
         }
     }
 
     // 服务器下发的玩家姿态
     private void OnPlayerPositionRecived(Session session, S2C_BroadcastPlayerPose pose)
     {
-        if (this.player == null)
+        if (this.self == null)
         {
             // not login yet
             return;
@@ -186,7 +188,7 @@ public class Client : MonoBehaviour
         for (int i = 0; i < pose.infos.Count; i++)
         {
             var playerinfo = pose.infos[i];
-            if (playerinfo.playerid != this.player.playerid)
+            if (playerinfo.playerid != this.self.playerid)
             {
                 if (players.ContainsKey(playerinfo.playerid))
                 {
@@ -201,20 +203,20 @@ public class Client : MonoBehaviour
     // 服务器请求上报玩家姿态
     private void OnSvrPlayerPoseRequired(Session session, S2C_RequirePlayerPose pose)
     {
-        if (player != null)
+        if (self != null)
         {
             // 向服务器发送自己的姿态
-            player.CapturePlayerState();
-            var report = ObjectPool.Allocate<C2S_ReportPlayerPose>();
+            self.CapturePlayerState();
+            using var report = ObjectPool.Allocate<PlayerPoseReport>();
             report.info = new PlayerInfo
             {
-                playerid = this.player.playerid,
-                name = this.player.playerName,
+                playerid = this.self.playerid,
+                name = this.self.playerName,
                 moveinfo = new MoveInfo
                 {
-                    position = player.position,
-                    velocity = player.velocity,
-                    rotation = player.rotation
+                    position = self.position,
+                    velocity = self.velocity,
+                    rotation = self.rotation
                 }
             };
             client.Send(report);
@@ -228,13 +230,15 @@ public class Client : MonoBehaviour
     {
         GameObject go = Instantiate(playerPrefab);
 
-        var player = new Player();
-        player.playerid = id;
-        player.playerName = name;
-        player.avatar = go;
+        var player = new Player
+        {
+            playerid = id,
+            playerName = name,
+            avatar = go
+        };
         player.avatar.GetComponentInChildren<TextMesh>().text = name;
 
-        // Is this ours
+        // self player?
         if (isLocal)
         {
             // Hide connection canvas

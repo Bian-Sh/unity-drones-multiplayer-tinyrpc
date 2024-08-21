@@ -35,9 +35,11 @@ public class Server : MonoBehaviour
         {
             players.Remove(player);
 
-            var report_disconnected = ObjectPool.Allocate<S2C_PlayerOffline>();
-            report_disconnected.playerid = player.playerid;
-            server.BoardcastOthers(session, report_disconnected);
+            var report = new PlayerOfflineReport
+            {
+                playerid = player.playerid
+            };
+            server.BroadcastOthers(session, report);
         }
         else
         {
@@ -59,6 +61,9 @@ public class Server : MonoBehaviour
 
     private void OnApplicationQuit()
     {
+        server.OnClientDisconnected -= Server_OnClientDisconnected;
+        server.OnClientEstablished -= Server_OnClientEstablished;
+        server.OnServerClosed -= Server_OnServerClosed;
         server.Stop();
     }
 
@@ -72,15 +77,15 @@ public class Server : MonoBehaviour
             if (players.Count > 0)
             {
                 // Send position to players 
-                var broadcast = ObjectPool.Allocate<S2C_BroadcastPlayerPose>();
+                using var broadcast = ObjectPool.Allocate<S2C_BroadcastPlayerPose>();
                 broadcast.frame = frame;
                 broadcast.infos = CollectPlayerInfos();
-                server.Boardcast(broadcast);
+                server.Broadcast(broadcast);
 
                 // ask pose again
-                var askpos = ObjectPool.Allocate<S2C_RequirePlayerPose>();
-                askpos.frame = frame++;
-                server.Boardcast(askpos);
+                using var askpos = ObjectPool.Allocate<S2C_RequirePlayerPose>();
+                askpos.frame = frame++; // fake frame, have not implement frame sync yet
+                server.Broadcast(askpos);
             }
         }
     }
@@ -88,15 +93,15 @@ public class Server : MonoBehaviour
 
     #region TinyRPC MessageHandler Task
     [MessageHandler(MessageType.RPC)]
-    private static async Task OnPlayerLoginAsync(Session session, C2S_Login request, S2C_Login response)
+    private static async Task OnPlayerLoginAsync(Session session, LoginRequest request, LoginResponse response)
     {
         // Add user to a list
         Player player = new()
         {
             session = session,
-            playerid = id,
+            playerid = id++,
             playerName = request.name,
-            position = Vector3.zero + Vector3.right * id * 2,
+            position = Vector3.zero + 2 * id * Vector3.right,
             rotation = Quaternion.identity,
             velocity = Vector3.zero
         };
@@ -104,15 +109,14 @@ public class Server : MonoBehaviour
         players.Add(player);
         response.playerid = player.playerid;
         response.success = true;
-        id++;
 
-        var report_login = ObjectPool.Allocate<S2C_PlayerLogin>();
-        report_login.playerinfo.playerid = player.playerid;
-        report_login.playerinfo.name = player.playerName;
-        report_login.playerinfo.moveinfo.position = player.position;
-        report_login.playerinfo.moveinfo.velocity = player.velocity;
-        report_login.playerinfo.moveinfo.rotation = player.rotation;
-        server.BoardcastOthers(session, report_login);
+        var report = new PlayerLoginReport();
+        report.playerinfo.playerid = player.playerid;
+        report.playerinfo.name = player.playerName;
+        report.playerinfo.moveinfo.position = player.position;
+        report.playerinfo.moveinfo.velocity = player.velocity;
+        report.playerinfo.moveinfo.rotation = player.rotation;
+        server.BroadcastOthers(session, report);
 
         await Task.CompletedTask;
     }
@@ -125,7 +129,7 @@ public class Server : MonoBehaviour
     /// <param name="response"></param>
     /// <returns></returns>
     [MessageHandler(MessageType.RPC)]
-    private static async Task OnRoomInfoRequestAsync(Session session, C2S_RoomInfo request, S2C_RoomInfo response)
+    private static async Task OnRoomInfoRequestAsync(Session session, GetRoomInfoRequest request, GetRoomInfoResponse response)
     {
         response.playerinfo = CollectPlayerInfos();
         await Task.CompletedTask;
@@ -137,7 +141,7 @@ public class Server : MonoBehaviour
     /// <param name="session"></param>
     /// <param name="message"></param>
     [MessageHandler(MessageType.Normal)]
-    private static void OnPlayerReportPose(Session session, C2S_ReportPlayerPose message)
+    private static void OnPlayerReportPose(Session session, PlayerPoseReport message)
     {
         var client = players.Find(c => c.session == session);
         client.position = message.info.moveinfo.position;
