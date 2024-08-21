@@ -24,7 +24,7 @@ You can also execute the server by opening `Scenes/server` in unity and pressing
 
 1. 你可以按上面描述的步骤分别打出2个包来体验
 
-2. 你可以通过 [ParrelSync](https://github.com/VeriorPies/ParrelSync) ,直接在编辑器中运行服务器和客户端！
+2. 你可以通过 [ParrelSync](https://github.com/VeriorPies/ParrelSync) 克隆出2个工程，全都开起来，2个做客户端，一个做服务端,这样就可以直接在编辑器中联调啦！
 
 ![](docs/parrellsync.png)
 
