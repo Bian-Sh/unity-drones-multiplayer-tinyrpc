@@ -1,0 +1,20 @@
+﻿#请在下面撰写网络协议： 
+
+# Common
+
+message PlayerInfo
+{
+	string name ;
+	int32 playerid ;
+	// 当首次获取时，此值等效为初始化点位
+	MoveInfo moveinfo ;
+}
+
+// 移动信息
+message MoveInfo 
+{
+	Vector3 position;
+	Quaternion rotation;
+	
+	Vector3 velocity ;
+}

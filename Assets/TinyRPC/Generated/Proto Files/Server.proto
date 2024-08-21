@@ -1,0 +1,45 @@
+﻿#请在下面撰写网络协议： 
+# Server side
+
+//ResponseType LoginResponse 
+message LoginRequest // Request
+{
+	string name ;
+	string password ;
+}
+
+message LoginResponse // Response
+{
+    bool success;
+    int32 playerid;
+}
+
+// 服务器定期请求玩家上报姿态信息
+message S2C_RequirePlayerPose // Message 
+{
+	// 请求发生在哪一帧
+	 int32 frame;
+}
+
+// 广播玩家姿态信息
+message S2C_BroadcastPlayerPose // Message
+{
+	// 请求发生在哪一帧
+	 int32 frame;
+	 
+	// 玩家的(移动)信息
+	repeated PlayerInfo infos ;
+}
+
+
+// 服务器广播玩家下线事件
+message PlayerOfflineReport // Message
+{
+	int32 playerid ;
+}
+
+// 服务器广播玩家上线事件	
+message PlayerLoginReport // Message
+{
+	PlayerInfo playerinfo ;
+}

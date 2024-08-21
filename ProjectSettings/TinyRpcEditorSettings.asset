@@ -13,6 +13,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   protos:
-  - {fileID: 102900000, guid: f63b7ec01a8199248a98c73a8f286983, type: 3}
+  - file: {fileID: 102900000, guid: fe42e768db6e376498e2e0b12c5c78cb, type: 3}
+    enable: 1
+  - file: {fileID: 102900000, guid: 04b375816d1502945be79ab973b5fa37, type: 3}
+    enable: 1
+  - file: {fileID: 102900000, guid: c8946b0be3f89814da7de4ce05d13f4f, type: 3}
+    enable: 1
+  currentLocationType: 0
   generatedScriptLocation: Assets/TinyRPC/Generated
   indentWithTab: 0
+  assemblies: []
+  generateAsPartialClass: []
